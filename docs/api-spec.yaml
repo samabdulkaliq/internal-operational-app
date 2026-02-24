@@ -1,0 +1,709 @@
+openapi: "3.0.3"
+info:
+  title: CleanOps API — Phase 1 MVP
+  version: "1.0.0"
+  description: |
+    Internal operations API for cleaning workforce management.
+    Phase 1: Automatic geofence clock-in with offline sync.
+
+servers:
+  - url: https://api.cleanops.example.com/api/v1
+    description: Production
+  - url: http://localhost:3000/api/v1
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    TimeEventInput:
+      type: object
+      required:
+        - client_event_id
+        - event_type
+        - source
+        - device_timestamp
+        - property_id
+      properties:
+        client_event_id:
+          type: string
+          format: uuid
+          description: Idempotency key generated on device
+        event_type:
+          type: string
+          enum: [clock_in, clock_out, break_start, break_end]
+        source:
+          type: string
+          enum:
+            - geofence_auto
+            - push_wake_location
+            - significant_change
+            - manual_checkin
+            - ble_beacon
+            - nfc_tap
+            - wifi_ssid
+            - manager_override
+        device_timestamp:
+          type: string
+          format: date-time
+        property_id:
+          type: string
+          format: uuid
+        shift_id:
+          type: string
+          format: uuid
+          nullable: true
+        lat:
+          type: number
+          format: double
+        lng:
+          type: number
+          format: double
+        accuracy_meters:
+          type: number
+          format: double
+        location_provider:
+          type: string
+          enum: [fused, gps, network, passive]
+        battery_level:
+          type: number
+          minimum: 0
+          maximum: 1
+        is_mock_location:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+          additionalProperties: true
+
+    TimeEventResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        source:
+          type: string
+        device_timestamp:
+          type: string
+          format: date-time
+        server_timestamp:
+          type: string
+          format: date-time
+        validation_status:
+          type: string
+          enum: [pending, valid, invalid, flagged]
+        validation_details:
+          type: object
+        requires_approval:
+          type: boolean
+
+    BatchSyncRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeEventInput"
+          maxItems: 50
+
+    BatchSyncResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              client_event_id:
+                type: string
+                format: uuid
+              status:
+                type: string
+                enum: [created, duplicate, rejected, flagged]
+              server_id:
+                type: string
+                format: uuid
+                description: Set when status is "created"
+              existing_server_id:
+                type: string
+                format: uuid
+                description: Set when status is "duplicate" — the ID of the previously accepted event
+              reason:
+                type: string
+                nullable: true
+
+    WorkerAssignment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        property_id:
+          type: string
+          format: uuid
+        property_name:
+          type: string
+        property_lat:
+          type: number
+        property_lng:
+          type: number
+        schedule:
+          type: object
+        geofences:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              lat:
+                type: number
+              lng:
+                type: number
+              radius_meters:
+                type: integer
+              label:
+                type: string
+
+    Shift:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        property_id:
+          type: string
+          format: uuid
+        property_name:
+          type: string
+        scheduled_start:
+          type: string
+          format: date-time
+        scheduled_end:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [scheduled, in_progress, completed, no_show, cancelled]
+
+    ExceptionEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        worker_name:
+          type: string
+        property_id:
+          type: string
+          format: uuid
+        property_name:
+          type: string
+        exception_type:
+          type: string
+        severity:
+          type: string
+        status:
+          type: string
+        details:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    ExceptionResolveInput:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          type: string
+          enum:
+            - approved_retroactive
+            - marked_no_show
+            - false_alarm
+            - worker_counseled
+        notes:
+          type: string
+        retroactive_clock_in_time:
+          type: string
+          format: date-time
+          description: Required if resolution is approved_retroactive
+
+    DeviceInfoInput:
+      type: object
+      required: [platform]
+      properties:
+        platform:
+          type: string
+          enum: [ios, android]
+        os_version:
+          type: string
+        device_model:
+          type: string
+        app_version:
+          type: string
+        push_token:
+          type: string
+        location_permission:
+          type: string
+          enum: [always, when_in_use, denied, not_determined]
+        notification_permission:
+          type: string
+          enum: [granted, denied, not_determined]
+        battery_optimization_exempt:
+          type: boolean
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        actor_id:
+          type: string
+          format: uuid
+        actor_role:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+          format: uuid
+        payload:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+paths:
+  # ---- AUTH ----
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with phone OTP or email/password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                otp:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: JWT tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  refresh_token:
+                    type: string
+                  expires_in:
+                    type: integer
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      role:
+                        type: string
+                      tenant_id:
+                        type: string
+        "401":
+          description: Invalid credentials
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: New tokens
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user profile
+      responses:
+        "200":
+          description: User profile with role and tenant
+        "401":
+          description: Missing or invalid authentication token
+
+  # ---- TIME EVENTS ----
+  /time-events:
+    post:
+      tags: [Time Events]
+      summary: Create a single time event (clock-in/out)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TimeEventInput"
+      responses:
+        "201":
+          description: Event created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEventResponse"
+        "401":
+          description: Missing or invalid authentication token
+        "409":
+          description: Duplicate event (same client_event_id within tenant)
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /time-events/batch:
+    post:
+      tags: [Time Events]
+      summary: Sync offline queue (batch of events)
+      description: |
+        Accepts up to 50 events. Returns 207 Multi-Status with per-event results.
+        Uses client_event_id for idempotency — safe to retry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchSyncRequest"
+      responses:
+        "207":
+          description: Multi-status response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchSyncResponse"
+        "401":
+          description: Missing or invalid authentication token
+
+  /time-events/{id}/validate:
+    post:
+      tags: [Time Events]
+      summary: Re-validate a time event against geofence
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEventResponse"
+        "401":
+          description: Missing or invalid authentication token
+        "403":
+          description: Insufficient permissions (manager/admin required)
+
+  # ---- CURRENT WORKER (mobile endpoints) ----
+  /me/assignments:
+    get:
+      tags: [Me]
+      summary: Get current worker's active property assignments with geofences
+      description: |
+        Returns all active assignments for the authenticated worker, including
+        geofence data. The mobile app calls this on launch to register geofences.
+        Worker identity is derived from the JWT — no ID in the URL.
+      responses:
+        "200":
+          description: List of assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkerAssignment"
+        "401":
+          description: Missing or invalid authentication token
+
+  /me/shifts/today:
+    get:
+      tags: [Me]
+      summary: Get today's scheduled shifts for the current worker
+      description: |
+        Worker identity is derived from the JWT — no ID in the URL.
+      responses:
+        "200":
+          description: Today's shifts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shifts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Shift"
+        "401":
+          description: Missing or invalid authentication token
+
+  # ---- PROPERTIES ----
+  /properties/{id}/geofence:
+    get:
+      tags: [Properties]
+      summary: Get geofence configuration for a property
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Geofence config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  geofences:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        lat:
+                          type: number
+                        lng:
+                          type: number
+                        radius_meters:
+                          type: integer
+                        geofence_type:
+                          type: string
+                        label:
+                          type: string
+        "401":
+          description: Missing or invalid authentication token
+
+  # ---- EXCEPTIONS ----
+  /exceptions:
+    get:
+      tags: [Exceptions]
+      summary: List exception events (manager view)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, acknowledged, resolved, dismissed]
+        - name: worker_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: property_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated exceptions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exceptions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExceptionEvent"
+                  total:
+                    type: integer
+        "401":
+          description: Missing or invalid authentication token
+        "403":
+          description: Insufficient permissions (manager/admin required)
+
+  /exceptions/{id}/resolve:
+    post:
+      tags: [Exceptions]
+      summary: Resolve an exception (manager action)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExceptionResolveInput"
+      responses:
+        "200":
+          description: Exception resolved
+        "401":
+          description: Missing or invalid authentication token
+        "403":
+          description: Insufficient permissions (manager/admin required)
+
+  # ---- AUDIT LOG ----
+  /audit-log:
+    get:
+      tags: [Audit]
+      summary: Query audit trail
+      parameters:
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: actor_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: target_type
+          in: query
+          schema:
+            type: string
+        - name: target_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditLogEntry"
+                  total:
+                    type: integer
+        "401":
+          description: Missing or invalid authentication token
+        "403":
+          description: Insufficient permissions (manager/admin required)
+
+  # ---- DEVICE INFO ----
+  /device-info:
+    post:
+      tags: [Device]
+      summary: Register or update device metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceInfoInput"
+      responses:
+        "200":
+          description: Device info saved
+        "401":
+          description: Missing or invalid authentication token

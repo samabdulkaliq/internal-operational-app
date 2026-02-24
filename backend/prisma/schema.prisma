@@ -1,0 +1,408 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                String             @id @default(uuid()) @db.Uuid
+  name              String
+  slug              String             @unique
+  timezone          String             @default("UTC")
+  isActive          Boolean            @default(true) @map("is_active")
+  settings          Json               @default("{}")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  auditLogs         AuditLog[]
+  complianceRules   ComplianceRule[]
+  deviceInfos       DeviceInfo[]
+  exceptionEvents   ExceptionEvent[]
+  geofences         Geofence[]
+  properties        Property[]
+  shifts            Shift[]
+  timeEvents        TimeEvent[]
+  workers           Worker[]
+  workerAssignments WorkerAssignment[]
+
+  @@map("tenant")
+}
+
+model Worker {
+  id                 String             @id @default(uuid()) @db.Uuid
+  tenantId           String             @map("tenant_id") @db.Uuid
+  externalId         String?            @map("external_id")
+  fullName           String             @map("full_name")
+  phone              String?
+  email              String?
+  role               WorkerRole         @default(cleaner)
+  isActive           Boolean            @default(true) @map("is_active")
+  metadata           Json               @default("{}")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  auditLogs          AuditLog[]
+  deviceInfos        DeviceInfo[]
+  resolvedExceptions ExceptionEvent[]   @relation("ResolvedByWorker")
+  exceptionEvents    ExceptionEvent[]   @relation("WorkerExceptions")
+  shifts             Shift[]
+  approvedEvents     TimeEvent[]        @relation("ApprovedByWorker")
+  timeEvents         TimeEvent[]        @relation("WorkerTimeEvents")
+  tenant             Tenant             @relation(fields: [tenantId], references: [id])
+  assignments        WorkerAssignment[]
+
+  @@index([tenantId])
+  @@index([phone])
+  @@map("worker")
+}
+
+model Property {
+  id              String             @id @default(uuid()) @db.Uuid
+  tenantId        String             @map("tenant_id") @db.Uuid
+  name            String
+  address         String?
+  lat             Float
+  lng             Float
+  timezone        String?
+  isActive        Boolean            @default(true) @map("is_active")
+  metadata        Json               @default("{}")
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  exceptionEvents ExceptionEvent[]
+  geofences       Geofence[]
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  shifts          Shift[]
+  timeEvents      TimeEvent[]
+  assignments     WorkerAssignment[]
+
+  @@index([tenantId])
+  @@index([lat, lng])
+  @@map("property")
+}
+
+model Geofence {
+  id            String       @id @default(uuid()) @db.Uuid
+  propertyId    String       @map("property_id") @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  label         String       @default("main")
+  lat           Float
+  lng           Float
+  radiusMeters  Int          @default(150) @map("radius_meters")
+  geofenceType  GeofenceType @default(circle) @map("geofence_type")
+  polygonCoords Json?        @map("polygon_coords")
+  isActive      Boolean      @default(true) @map("is_active")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property      Property     @relation(fields: [propertyId], references: [id])
+  tenant        Tenant       @relation(fields: [tenantId], references: [id])
+
+  @@index([propertyId])
+  @@index([tenantId])
+  @@map("geofence")
+}
+
+model WorkerAssignment {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  workerId   String    @map("worker_id") @db.Uuid
+  propertyId String    @map("property_id") @db.Uuid
+  startDate  DateTime  @map("start_date") @db.Date
+  endDate    DateTime? @map("end_date") @db.Date
+  schedule   Json      @default("{}")
+  isActive   Boolean   @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  shifts     Shift[]
+  property   Property  @relation(fields: [propertyId], references: [id])
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  worker     Worker    @relation(fields: [workerId], references: [id])
+
+  @@index([workerId])
+  @@index([propertyId])
+  @@index([tenantId])
+  @@map("worker_assignment")
+}
+
+model Shift {
+  id              String            @id @default(uuid()) @db.Uuid
+  tenantId        String            @map("tenant_id") @db.Uuid
+  workerId        String            @map("worker_id") @db.Uuid
+  propertyId      String            @map("property_id") @db.Uuid
+  assignmentId    String?           @map("assignment_id") @db.Uuid
+  scheduledStart  DateTime          @map("scheduled_start") @db.Timestamptz(6)
+  scheduledEnd    DateTime          @map("scheduled_end") @db.Timestamptz(6)
+  actualStart     DateTime?         @map("actual_start") @db.Timestamptz(6)
+  actualEnd       DateTime?         @map("actual_end") @db.Timestamptz(6)
+  status          ShiftStatus       @default(scheduled)
+  metadata        Json              @default("{}")
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  exceptionEvents ExceptionEvent[]
+  assignment      WorkerAssignment? @relation(fields: [assignmentId], references: [id])
+  property        Property          @relation(fields: [propertyId], references: [id])
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  worker          Worker            @relation(fields: [workerId], references: [id])
+  timeEvents      TimeEvent[]
+
+  @@index([workerId])
+  @@index([propertyId])
+  @@index([tenantId])
+  @@index([scheduledStart, scheduledEnd])
+  @@index([status])
+  @@map("shift")
+}
+
+model TimeEvent {
+  id                 String           @id @default(uuid()) @db.Uuid
+  clientEventId      String           @map("client_event_id") @db.Uuid
+  tenantId           String           @map("tenant_id") @db.Uuid
+  workerId           String           @map("worker_id") @db.Uuid
+  propertyId         String           @map("property_id") @db.Uuid
+  shiftId            String?          @map("shift_id") @db.Uuid
+  eventType          TimeEventType    @map("event_type")
+  source             TimeEventSource
+  deviceTimestamp    DateTime         @map("device_timestamp") @db.Timestamptz(6)
+  receivedAt         DateTime         @default(now()) @map("received_at") @db.Timestamptz(6)
+  lat                Float?
+  lng                Float?
+  accuracyMeters     Float?           @map("accuracy_meters")
+  locationProvider   String?          @map("location_provider")
+  batteryLevel       Float?           @map("battery_level")
+  isMockLocation     Boolean          @default(false) @map("is_mock_location")
+  validationStatus   ValidationStatus @default(pending) @map("validation_status")
+  validationDetails  Json             @default("{}") @map("validation_details")
+  complianceRuleId   String?          @map("compliance_rule_id") @db.Uuid
+  requiresApproval   Boolean          @default(false) @map("requires_approval")
+  approvedBy         String?          @map("approved_by") @db.Uuid
+  approvedAt         DateTime?        @map("approved_at") @db.Timestamptz(6)
+  metadata           Json             @default("{}")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  exceptionEvents    ExceptionEvent[]
+  approver           Worker?          @relation("ApprovedByWorker", fields: [approvedBy], references: [id])
+  complianceRule     ComplianceRule?  @relation(fields: [complianceRuleId], references: [id])
+  property           Property         @relation(fields: [propertyId], references: [id])
+  shift              Shift?           @relation(fields: [shiftId], references: [id])
+  tenant             Tenant           @relation(fields: [tenantId], references: [id])
+  worker             Worker           @relation("WorkerTimeEvents", fields: [workerId], references: [id])
+  sessionEnterEvents TimeSession[]    @relation("SessionEnterEvent")
+  sessionExitEvents  TimeSession[]    @relation("SessionExitEvent")
+
+  @@unique([tenantId, clientEventId], name: "uq_tenant_client_event")
+  @@index([tenantId, workerId, deviceTimestamp(sort: Desc)], map: "idx_te_tenant_worker_ts")
+  @@index([tenantId, propertyId, deviceTimestamp(sort: Desc)], map: "idx_te_tenant_property_ts")
+  @@index([shiftId])
+  @@index([eventType])
+  @@index([validationStatus])
+  @@map("time_event")
+}
+
+model TimeSession {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @map("tenant_id") @db.Uuid
+  workerId     String        @map("worker_id") @db.Uuid
+  propertyId   String        @map("property_id") @db.Uuid
+  shiftId      String?       @map("shift_id") @db.Uuid
+  enterEventId String        @map("enter_event_id") @db.Uuid
+  exitEventId  String?       @map("exit_event_id") @db.Uuid
+  status       SessionStatus @default(open)
+  startedAt    DateTime      @map("started_at") @db.Timestamptz(6)
+  endedAt      DateTime?     @map("ended_at") @db.Timestamptz(6)
+  durationMins Int?          @map("duration_mins")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  enterEvent   TimeEvent     @relation("SessionEnterEvent", fields: [enterEventId], references: [id])
+  exitEvent    TimeEvent?    @relation("SessionExitEvent", fields: [exitEventId], references: [id])
+
+  @@index([tenantId, workerId])
+  @@index([tenantId, propertyId])
+  @@index([status])
+  @@map("time_session")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  eventType  String   @map("event_type")
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorRole  String?  @map("actor_role")
+  targetType String?  @map("target_type")
+  targetId   String?  @map("target_id") @db.Uuid
+  payload    Json     @default("{}")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor      Worker?  @relation(fields: [actorId], references: [id])
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, targetType, targetId, createdAt(sort: Desc)], map: "idx_audit_tenant_entity")
+  @@index([tenantId, eventType])
+  @@index([actorId])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_log")
+}
+
+model ExceptionEvent {
+  id            String          @id @default(uuid()) @db.Uuid
+  tenantId      String          @map("tenant_id") @db.Uuid
+  workerId      String?         @map("worker_id") @db.Uuid
+  propertyId    String?         @map("property_id") @db.Uuid
+  shiftId       String?         @map("shift_id") @db.Uuid
+  timeEventId   String?         @map("time_event_id") @db.Uuid
+  exceptionType ExceptionType   @map("exception_type")
+  severity      Severity        @default(medium)
+  status        ExceptionStatus @default(open)
+  resolution    String?
+  resolvedBy    String?         @map("resolved_by") @db.Uuid
+  resolvedAt    DateTime?       @map("resolved_at") @db.Timestamptz(6)
+  notes         String?
+  details       Json            @default("{}")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property      Property?       @relation(fields: [propertyId], references: [id])
+  resolver      Worker?         @relation("ResolvedByWorker", fields: [resolvedBy], references: [id])
+  shift         Shift?          @relation(fields: [shiftId], references: [id])
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  timeEvent     TimeEvent?      @relation(fields: [timeEventId], references: [id])
+  worker        Worker?         @relation("WorkerExceptions", fields: [workerId], references: [id])
+
+  @@index([tenantId])
+  @@index([workerId])
+  @@index([shiftId])
+  @@index([status])
+  @@index([exceptionType])
+  @@map("exception_event")
+}
+
+model ComplianceRule {
+  id          String      @id @default(uuid()) @db.Uuid
+  tenantId    String      @map("tenant_id") @db.Uuid
+  name        String
+  description String?
+  ruleType    String      @map("rule_type")
+  parameters  Json        @default("{}")
+  isActive    Boolean     @default(true) @map("is_active")
+  priority    Int         @default(0)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  timeEvents  TimeEvent[]
+
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("compliance_rule")
+}
+
+model DeviceInfo {
+  id                        String    @id @default(uuid()) @db.Uuid
+  workerId                  String    @map("worker_id") @db.Uuid
+  tenantId                  String    @map("tenant_id") @db.Uuid
+  platform                  Platform
+  osVersion                 String?   @map("os_version")
+  deviceModel               String?   @map("device_model")
+  appVersion                String?   @map("app_version")
+  pushToken                 String?   @map("push_token")
+  locationPermission        String?   @map("location_permission")
+  notificationPermission    String?   @map("notification_permission")
+  batteryOptimizationExempt Boolean?  @map("battery_optimization_exempt")
+  lastSeenAt                DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenant                    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  worker                    Worker    @relation(fields: [workerId], references: [id])
+
+  @@unique([workerId, platform])
+  @@index([workerId])
+  @@index([tenantId])
+  @@map("device_info")
+}
+
+model playing_with_neon {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value Float? @db.Real
+}
+
+enum WorkerRole {
+  cleaner
+  supervisor
+  manager
+  admin
+}
+
+enum GeofenceType {
+  circle
+  polygon
+}
+
+enum ShiftStatus {
+  scheduled
+  in_progress
+  completed
+  no_show
+  cancelled
+}
+
+enum TimeEventType {
+  clock_in
+  clock_out
+  break_start
+  break_end
+}
+
+enum TimeEventSource {
+  geofence_auto
+  push_wake_location
+  significant_change
+  manual_checkin
+  ble_beacon
+  nfc_tap
+  wifi_ssid
+  manager_override
+}
+
+enum ValidationStatus {
+  pending
+  valid
+  invalid
+  flagged
+}
+
+enum SessionStatus {
+  open
+  closed
+  closed_by_system
+}
+
+enum ExceptionType {
+  missing_clock_in
+  missing_clock_out
+  late_arrival
+  early_departure
+  mock_location_detected
+  teleportation_anomaly
+  static_coords_anomaly
+  clock_skew_anomaly
+  permission_downgrade
+  outside_geofence
+  manual_review_requested
+}
+
+enum Severity {
+  low
+  medium
+  high
+  critical
+}
+
+enum ExceptionStatus {
+  open
+  acknowledged
+  resolved
+  dismissed
+}
+
+enum Platform {
+  ios
+  android
+}
