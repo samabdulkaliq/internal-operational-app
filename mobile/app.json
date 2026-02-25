@@ -9,9 +9,20 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": ["location"],
+        "NSLocationWhenInUseUsageDescription": "This app needs location to clock you in when you arrive at a job site.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs background location to automatically clock you in when you arrive at a job site, even when the app is closed."
+      }
     },
     "android": {
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -27,6 +38,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "This app needs background location to automatically clock you in when you arrive at a job site.",
+          "locationWhenInUsePermission": "This app needs location to clock you in when you arrive at a job site."
+        }
+      ],
       [
         "expo-splash-screen",
         {
