@@ -12,9 +12,9 @@ export declare class MeService {
             propertyAddress: string | null;
             schedule: import("@prisma/client/runtime/library").JsonValue;
             geofences: {
+                id: string;
                 lat: number;
                 lng: number;
-                id: string;
                 label: string;
                 radiusMeters: number;
                 geofenceType: import(".prisma/client").$Enums.GeofenceType;
